@@ -31,3 +31,13 @@ Thumbs.db
 # Outputs that can be regenerated
 results/
 figures/
+
+
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+
+data/raw/
+*.nii
+*.nii.gz
