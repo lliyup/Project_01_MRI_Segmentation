@@ -28,7 +28,18 @@
 
 ## 3. 当前项目结果
 
-### 3.1 Patch-level validation result
+本项目当前包含两个版本：
+
+```text
+Version 1.0: Self-implemented 3D U-Net baseline
+Version 2.0: Self-implemented 3D U-Net + nnU-Net v2 comparison
+```
+
+---
+
+### 3.1 V1.0：自实现 3D U-Net baseline
+
+#### Patch-level validation result
 
 | Metric        |  Value |
 | ------------- | -----: |
@@ -37,7 +48,7 @@
 | Best Val Dice | 0.9412 |
 | Best Val IoU  | 0.8892 |
 
-### 3.2 Whole-volume evaluation result
+#### Whole-volume evaluation result
 
 | Setting             | Mean Dice | Mean IoU | Mean HD95 |
 | ------------------- | --------: | -------: | --------: |
@@ -51,7 +62,7 @@
 * Raw prediction 存在远处假阳性，导致 HD95 偏高；
 * 最大连通区域后处理 Largest Connected Component, LCC 能够有效去除远处假阳性，使 Dice 提升、HD95 大幅下降。
 
-### 3.3 Case-level analysis
+#### Case-level analysis
 
 | Case            | Role                  | Result                                    |
 | --------------- | --------------------- | ----------------------------------------- |
@@ -59,6 +70,25 @@
 | `la_003.nii.gz` | Worst LCC case        | LCC Dice = 0.7976, LCC HD95 = 10.08 mm    |
 | `la_007.nii.gz` | Most improved by Dice | Raw Dice = 0.5760 → LCC Dice = 0.8189     |
 | `la_016.nii.gz` | Most improved by HD95 | Raw HD95 = 217.90 mm → LCC HD95 = 9.34 mm |
+
+---
+
+### 3.2 V2.0：nnU-Net v2 strong baseline comparison
+
+在 V2.0 中，本项目进一步引入 **nnU-Net v2 3d_fullres** 作为医学影像分割强基线，并完成 50 epoch short-run 对照实验。
+
+| Method                          | Setting                                    | Mean Dice | Mean IoU | Mean HD95 |
+| ------------------------------- | ------------------------------------------ | --------: | -------: | --------: |
+| Self-implemented 3D U-Net Raw   | whole-volume sliding window                |    0.7329 |   0.5882 | 162.87 mm |
+| Self-implemented 3D U-Net + LCC | whole-volume + largest connected component |    0.8276 |   0.7076 |  11.85 mm |
+| nnU-Net v2 3d_fullres           | fold 0, 50 epochs short-run                |    0.9325 |   0.8736 |   3.04 mm |
+
+V2.0 结果说明：
+
+* 自实现 3D U-Net 成功完成了医学影像分割的完整 baseline 流程；
+* LCC 后处理能显著减少远处假阳性，使 whole-volume Dice 和 HD95 明显改善；
+* nnU-Net v2 作为医学图像分割强基线，在自动规划、预处理、数据增强、推理和后处理方面明显优于手写 baseline；
+* 当前对照实验中，自实现 3D U-Net 与 nnU-Net 的验证病例划分不完全一致，因此该表应视为方法级参考对照，而不是严格同一验证集下的公平比较。
 
 ---
 
@@ -103,6 +133,9 @@ Project_01_MRI_Segmentation/
 │   ├── heart_volume_metrics_with_hd95.csv
 │   ├── final_experiment_summary.csv
 │   ├── final_experiment_summary.txt
+│   ├── nnunet_50epoch_validation_metrics.csv
+│   ├── v2_comparison_summary.csv
+│   ├── v2_comparison_summary.txt
 │   └── predictions/
 │       └── volume_eval/
 │           ├── la_003_raw_pred.nii.gz
@@ -673,7 +706,116 @@ results/final_experiment_summary.txt
 
 ---
 
-## 19. 一键复现实验流程
+## 19. V2.0：nnU-Net v2 对照实验
+
+### 19.1 转换 MSD Heart 为 nnU-Net v2 格式
+
+运行：
+
+```bash
+python scripts/prepare_nnunet_heart.py
+```
+
+目标目录：
+
+```text
+D:/nnunet_work/nnUNet_raw/Dataset002_Heart/
+```
+
+nnU-Net v2 数据格式要求：
+
+```text
+Dataset002_Heart/
+├── dataset.json
+├── imagesTr/
+│   ├── la_003_0000.nii.gz
+│   └── ...
+├── labelsTr/
+│   ├── la_003.nii.gz
+│   └── ...
+└── imagesTs/
+```
+
+### 19.2 配置 nnU-Net 环境变量
+
+PowerShell 示例：
+
+```powershell
+$Env:nnUNet_raw = "D:/nnunet_work/nnUNet_raw"
+$Env:nnUNet_preprocessed = "D:/nnunet_work/nnUNet_preprocessed"
+$Env:nnUNet_results = "D:/nnunet_work/nnUNet_results"
+$Env:nnUNet_n_proc_DA = "1"
+$Env:nnUNet_def_n_proc = "1"
+```
+
+### 19.3 nnU-Net 预处理
+
+```bash
+nnUNetv2_plan_and_preprocess -d 2 -c 3d_fullres --verify_dataset_integrity
+```
+
+### 19.4 自定义 50 epoch trainer
+
+本项目使用自定义短训 trainer：
+
+```text
+nnUNetTrainer_50epochs
+```
+
+其作用是将 nnU-Net 默认训练轮数缩短为 50 epoch，用于保研项目中的强基线对照实验。
+
+### 19.5 训练 nnU-Net 3d_fullres fold 0
+
+```bash
+nnUNetv2_train 2 3d_fullres 0 -tr nnUNetTrainer_50epochs
+```
+
+训练完成后，nnU-Net validation 输出：
+
+```text
+Mean Validation Dice: 0.9325
+```
+
+### 19.6 计算 nnU-Net Dice / IoU / HD95
+
+运行：
+
+```bash
+python scripts/compute_nnunet_metrics.py
+```
+
+输出：
+
+```text
+results/nnunet_50epoch_validation_metrics.csv
+```
+
+结果：
+
+```text
+Mean Dice: 0.9325
+Mean IoU: 0.8736
+Mean HD95: 3.04 mm
+```
+
+### 19.7 生成 V2.0 对照 summary
+
+运行：
+
+```bash
+python scripts/generate_v2_comparison_summary.py
+```
+
+输出：
+
+```text
+results/v2_comparison_summary.csv
+results/v2_comparison_summary.txt
+```
+
+---
+
+## 20. 一键复现实验流程
 
 如果环境和数据已经准备好，可以按照以下顺序复现实验：
 
@@ -719,11 +861,18 @@ python scripts/visualize_volume_cases.py
 
 # 13. 生成最终 summary
 python scripts/generate_final_summary.py
+
+# 14. nnU-Net v2 对照实验相关步骤
+python scripts/prepare_nnunet_heart.py
+nnUNetv2_plan_and_preprocess -d 2 -c 3d_fullres --verify_dataset_integrity
+nnUNetv2_train 2 3d_fullres 0 -tr nnUNetTrainer_50epochs
+python scripts/compute_nnunet_metrics.py
+python scripts/generate_v2_comparison_summary.py
 ```
 
 ---
 
-## 20. 当前结论
+## 21. 当前结论
 
 本项目表明，自实现轻量级 3D U-Net 能够在心脏 MRI 左心房分割任务中学习到有效的三维结构特征。
 
@@ -753,7 +902,7 @@ Mean LCC HD95 = 11.85 mm
 
 ---
 
-## 21. 项目局限性
+## 22. 项目局限性
 
 当前版本仍存在以下局限：
 
@@ -766,7 +915,7 @@ Mean LCC HD95 = 11.85 mm
 
 ---
 
-## 22. 后续改进方向
+## 23. 后续改进方向
 
 后续可从以下方向继续扩展：
 
@@ -793,7 +942,7 @@ Mean LCC HD95 = 11.85 mm
 
 ---
 
-## 23. 项目定位
+## 24. 项目定位
 
 本项目可以作为医学影像 AI 方向的入门级完整 baseline，用于展示以下能力：
 
@@ -806,14 +955,24 @@ Mean LCC HD95 = 11.85 mm
 
 ---
 
-## 24. 备注
+## 25. 备注
 
-本项目当前为 **Version 1.0: Self-implemented 3D U-Net baseline**。
+本项目当前已经完成两个版本：
+
+```text
+Version 1.0: Self-implemented 3D U-Net baseline
+Version 2.0: Self-implemented 3D U-Net + nnU-Net v2 comparison
+```
 
 下一版本建议扩展为：
 
 ```text
-Version 2.0: Self-implemented 3D U-Net + nnU-Net/MONAI comparison
+Version 3.0: Unified split comparison + MONAI pipeline + stronger error analysis
 ```
 
-届时可进一步形成更完整的保研/推免项目展示材料。
+V3.0 可进一步实现：
+
+* 统一自实现 3D U-Net 与 nnU-Net 的训练/验证划分；
+* 使用 MONAI 复现数据增强、滑窗推理和指标计算流程；
+* 增加更多失败案例分析；
+* 尝试背景困难负样本采样与边界损失函数；
